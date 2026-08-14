@@ -258,7 +258,7 @@ class ReportGenerator:
                 lines.append(f"| 内臓脂肪 | {r.get('visceral_fat_level', '-')} |")
                 lines.append(f"| 基礎代謝 | {r.get('basal_metabolism_kcal', '-')} kcal |")
                 lines.append(f"| 体内水分率 | {r.get('body_water_percent', '-')}% |")
-                lines.append(f"| 骨塩量 | {r.get('bone_mass_kg', '-')} kg |")
+                lines.append(f"| 骨塩量 | {r.get('bone_salt_mass_kg', '-')} kg |")
                 lines.append(f"| 体年齢 | {r.get('body_age', '-')}歳 |")
             else:
                 lines.append("> [!NOTE] 体組成データなし")

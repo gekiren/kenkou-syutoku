@@ -9,8 +9,8 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 
 # ADBおよびデバイス設定
-ADB_PATH = os.getenv("ADB_PATH", r"C:\Users\toshi\AppData\Local\Android\Sdk\platform-tools\adb.exe")
-DEVICE_ID = os.getenv("DEVICE_ID", "SDEDU19A29007380")
+ADB_PATH = os.getenv("ADB_PATH", "")
+DEVICE_ID = os.getenv("DEVICE_ID", "")
 PACKAGE_NAME = os.getenv("PACKAGE_NAME", "com.huawei.health")
 
 # デフォルト取得日数

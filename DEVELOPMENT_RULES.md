@@ -264,14 +264,14 @@
 ## 5. AIモデル仕様および API 利用ルール (Gemini 3.6 Flash & DeepSeek V4 Flash)
 
 ### ① 使用する最新モデルの絶対的な指定
-- **Gemini API 最新モデル**: **`gemini-3.6-flash`** (または `gemini-3.5-flash`)
-  - **【絶対遵守】モデル指定の固定ルール**: Python / Node.js などのスクリプトやアプリケーションから Gemini API (`google.genai` SDK 等) を呼び出す際は、必ず **`gemini-3.6-flash`** または `gemini-3.5-flash` を明示的に指定してください。過去の旧モデル名（`gemini-2.5-flash`, `gemini-1.5-flash` 等）を指定すると `404 NOT_FOUND` エラーが返却されAPI呼び出しが完全に失敗するため、旧モデル名の使用は厳格に禁止します。
-  - **API仕様上の注意事項 (重要)**: Gemini 3.6 Flash では `temperature` や `top_p` などのサンプリングパラメータが廃止・非推奨となっています。リクエスト時の `generationConfig` 内に `temperature` を含めると API から HTTP 400 エラーが返却されるため、`generationConfig` には `temperature` 等を含めず呼び出してください。
+- **Gemini API 最新モデル**: **`gemini-3.7-flash`** (または `gemini-3.6-flash`)
+  - **【絶対遵守】モデル指定の固定ルール**: Python / Node.js などのスクリプトやアプリケーションから Gemini API (`google.genai` SDK 等) を呼び出す際は、必ず **`gemini-3.7-flash`** または `gemini-3.6-flash` を明示的に指定してください。過去の旧モデル名（`gemini-2.5-flash`, `gemini-1.5-flash` 等）を指定すると `404 NOT_FOUND` エラーが返却されAPI呼び出しが完全に失敗するため、旧モデル名の使用は厳格に禁止します。
+  - **API仕様上の注意事項 (重要)**: Gemini 3.7 Flash では `temperature` や `top_p` などのサンプリングパラメータが廃止・非推奨となっています。リクエスト時の `generationConfig` 内に `temperature` を含めると API から HTTP 400 エラーが返却されるため、`generationConfig` には `temperature` 等を含めず呼び出してください。
 - **DeepSeek API 最新モデル**: **`deepseek-v4-flash`** (284B MoEモデル)
   - **API仕様上の注意事項 (重要)**: 公式 DeepSeek API (`https://api.deepseek.com`) はテキスト・コード専用モデルです。`image_url` 等のマルチモーダル画像データを直接送信すると API から HTTP 400 エラーが返却されるため、画像認識は Gemini 等に任せ、テキストデータ構造化・思考推論フェーズで `deepseek-v4-flash` を使用してください。
 
 ### ② サーバー（Worker）接続仕様
-- サーバー（Cloudflare Workers プロキシ）およびクライアント側接続先は、上記の最新モデル (`gemini-3.6-flash` ⇄ `deepseek-v4-flash`) を指定・維持してください。
+- **サーバー（Cloudflare Workers プロキシ）およびクライアント側接続先は、上記の最新モデル (`gemini-3.7-flash` ⇄ `deepseek-v4-flash`) を指定・維持してください。**
 
 
 ---
