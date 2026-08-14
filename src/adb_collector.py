@@ -1,13 +1,16 @@
 import subprocess
 import time
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, date
 from pathlib import Path
+from PIL import Image
 import config
+from src.calendar_picker import HealthCalendarPicker
 
 class ADBCollector:
     def __init__(self, adb_path=config.ADB_PATH, device_id=config.DEVICE_ID):
-        self.adb_path = adb_path
-        self.device_id = device_id
+        self.adb_path = str(adb_path)
+        self.device_id = str(device_id)
 
     def _run_adb(self, args):
         """ADBコマンドを実行するヘルパー関数"""
@@ -17,8 +20,8 @@ class ADBCollector:
         cmd.extend(args)
         
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-        if result.returncode != 0:
-            print(f"[ADB Warning/Error] {result.stderr.strip()}")
+        if result.returncode != 0 and "warning" not in result.stderr.lower():
+            print(f"[ADB Notice] {result.stderr.strip()}")
         return result.stdout.strip()
 
     def check_connection(self):
@@ -30,27 +33,28 @@ class ADBCollector:
 
     def wake_device(self):
         """画面を点灯させロックを解除する"""
-        print(" Waking up device screen and unlocking...")
-        # 画面点灯 (Keyevent 26)
-        self._run_adb(["shell", "input", "keyevent", "26"])
+        print("[Power] Waking up device screen and unlocking...")
+        self._run_adb(["shell", "settings", "put", "system", "screen_off_timeout", "1800000"])
+        self._run_adb(["shell", "input", "keyevent", "224"])
         time.sleep(1)
-        # 上スワイプでロック解除
         self._run_adb(["shell", "input", "swipe", "800", "2000", "800", "500", "200"])
         time.sleep(1)
 
     def launch_app(self, package_name=config.PACKAGE_NAME):
-        """HUAWEIヘルスアプリの完全クリーン起動 (画面点灯・ロック解除後に実行)"""
+        """HUAWEIヘルスアプリの完全クリーン起動"""
         self.wake_device()
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Force stopping and launching package: {package_name}...")
         self._run_adb(["shell", "am", "force-stop", package_name])
         time.sleep(1)
         self._run_adb(["shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
-        time.sleep(5)  # トップ画面読み込み待ち
+        print("Waiting 5 seconds for app top screen...")
+        time.sleep(5)
 
-    def swipe_prev_day(self):
-        """前日のデータ表示画面へスワイプ (画面中央を左から右へスワイプ)"""
-        self._run_adb(["shell", "input", "swipe", "200", "1000", "800", "1000", "300"])
-        time.sleep(2)  # 描画待ち
+    def back_to_top_gesture(self):
+        """画面右端から左へスワイプ（戻るジェスチャー）でトップ画面へ復帰"""
+        print("[Nav] Returning to Top Screen via right-edge back gesture...")
+        self._run_adb(["shell", "input", "swipe", "1580", "1200", "1200", "1200", "200"])
+        time.sleep(2)
 
     def capture_screenshot(self, save_path: Path):
         """画面をキャプチャし、真っ黒画像チェック後にPCへ保存"""
@@ -59,84 +63,250 @@ class ADBCollector:
         self._run_adb(["shell", "screencap", "-p", remote_path])
         self._run_adb(["pull", remote_path, str(save_path)])
         
-        # 真っ黒画像（スリープ状態）のチェック
+        # 描画不完全・消灯時のセーフティチェック
         try:
-            from PIL import Image
             img = Image.open(save_path).convert("L")
-            extrema = img.getextrema()
-            if extrema == (0, 0) or extrema[1] < 10:  # 完全な黒画像
-                print(f"[Warning] Captured screenshot {save_path.name} is BLACK! Attempting screen wake...")
-                self.wake_device()
-                time.sleep(2)
-                # 再撮影
+            # 画面中央部 (Y: 400〜2000) の輝度をチェック
+            w, h = img.size
+            crop_center = img.crop((100, 400, w - 100, h - 400))
+            center_extrema = crop_center.getextrema()
+            
+            if center_extrema == (0, 0) or center_extrema[1] < 10:
+                print(f"[Warning] Captured screenshot {save_path.name} content is empty/black! Waiting 4s and re-capturing...")
+                time.sleep(4)
                 self._run_adb(["shell", "screencap", "-p", remote_path])
                 self._run_adb(["pull", remote_path, str(save_path)])
         except Exception as e:
             print(f"[Image Check Error] {e}")
 
-        print(f" Saved screenshot: {save_path.name}")
+        print(f"  Saved screenshot: {save_path.name}")
 
-    def collect_days(self, days=config.DEFAULT_CAPTURE_DAYS, category="sleep"):
-        """各カテゴリのカードをタップして詳細画面を開き、当日および前日のスクリーンショットをキャプチャ"""
-        if not self.check_connection():
-            raise RuntimeError(f"Device {self.device_id} is not connected via ADB.")
+    # ==========================================
+    # 1. 睡眠 (Sleep) 取得フロー
+    # ==========================================
+    def collect_sleep(self, days=config.DEFAULT_CAPTURE_DAYS):
+        print(f"\n==================================================")
+        print(f" [1/4] Sleep Data Capture ({days} days)")
+        print(f"==================================================")
+        
+        print("[Sleep] Tapping Sleep Card (X=1350, Y=1150)...")
+        self._run_adb(["shell", "input", "tap", "1350", "1150"])
+        time.sleep(4)
 
-        # カテゴリごとのトップ画面上のカードタップ座標 (解像度 1600x2560)
-        card_coords = {
-            "sleep": (1350, 1150),
-            "heart_rate": (1015, 1248),
-            "body_composition": (200, 1650),
-            "stress": (606, 1780),
-            "spo2": (1150, 1650)
-        }
+        save_dir = config.SCREENSHOTS_DIR / "sleep"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        today = datetime.now()
 
-        # 全カテゴリ指定時の処理
-        target_categories = config.CATEGORIES if category == "all" else [category]
+        for i in range(days):
+            target_date = today - timedelta(days=i)
+            date_str = target_date.strftime("%Y%m%d")
+            filename = f"sleep_{date_str}.png"
+            save_path = save_dir / filename
 
-        for cat in target_categories:
-            print(f"\n==================================================")
-            print(f" Starting Detail Screen Capture for [{cat.upper()}] ({days} days)...")
-            print(f"==================================================")
-            
-            # 1. 画面点灯 ＆ ロック解除
-            self.wake_device()
-            
-            # 2. タスクキル ➔ アプリを新規起動 (クリーンなトップ画面を保証)
-            self._run_adb(["shell", "am", "force-stop", config.PACKAGE_NAME])
-            time.sleep(1)
-            self.launch_app(config.PACKAGE_NAME)
-            time.sleep(4)
+            print(f"[{i+1}/{days}] Capturing Sleep for {target_date.strftime('%Y/%m/%d')} -> {filename}")
+            self.capture_screenshot(save_path)
 
-            # 3. 対象カテゴリのカードをタップして詳細画面を開く
-            if cat in card_coords:
-                tx, ty = card_coords[cat]
-                print(f" Tapping [{cat}] card at (X={tx}, Y={ty}) to open Detail Screen...")
-                self._run_adb(["shell", "input", "tap", str(tx), str(ty)])
-                time.sleep(3)  # 詳細画面の読み込み待ち
+            if i < days - 1:
+                print("  Swiping to previous day (Left -> Right)...")
+                self._run_adb(["shell", "input", "swipe", "300", "1000", "1300", "1000", "300"])
+                time.sleep(2.5)
 
-            # 今日の日付から過去N日分をループ撮影
-            for i in range(days):
-                target_date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-                date_str = target_date.replace("-", "")
-                filename = f"{cat}_{date_str}.png"
-                save_path = config.SCREENSHOTS_DIR / cat / filename
+        self.back_to_top_gesture()
+        print(" [Sleep] Completed and Returned to Top Screen.")
 
-                print(f"[{i+1}/{days}] Capturing [{cat}] Detail Screen for {target_date} -> {filename}")
-                self.capture_screenshot(save_path)
+    # ==========================================
+    # 2. 心機能 (Heart Rate) 取得フロー
+    # ==========================================
+    def collect_heart_rate(self, days=config.DEFAULT_CAPTURE_DAYS):
+        print(f"\n==================================================")
+        print(f" [2/4] Heart Rate Data Capture ({days} days)")
+        print(f"==================================================")
+        
+        print("[Heart Rate] Tapping Heart Rate Card (X=1015, Y=1248)...")
+        self._run_adb(["shell", "input", "tap", "1015", "1248"])
+        time.sleep(4)
 
-                if i < days - 1:
-                    print(f" Swiping to previous day ({i+1} -> {i+2})...")
-                    # 詳細画面内で左から右へスワイプ (前日へ移動)
-                    self._run_adb(["shell", "input", "swipe", "300", "1000", "1300", "1000", "300"])
-                    time.sleep(2)  # 画面切り替え待ち
+        save_dir = config.SCREENSHOTS_DIR / "heart_rate"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        today = datetime.now()
 
-            # バックボタンでトップ画面へ復帰
+        for i in range(days):
+            target_date = today - timedelta(days=i)
+            date_str = target_date.strftime("%Y%m%d")
+            filename = f"heart_rate_{date_str}.png"
+            save_path = save_dir / filename
+
+            print(f"[{i+1}/{days}] Capturing Heart Rate for {target_date.strftime('%Y/%m/%d')} -> {filename}")
+            self.capture_screenshot(save_path)
+
+            if i < days - 1:
+                print("  Swiping to previous day (Left -> Right)...")
+                self._run_adb(["shell", "input", "swipe", "300", "1000", "1300", "1000", "300"])
+                time.sleep(2.5)
+
+        self.back_to_top_gesture()
+        print(" [Heart Rate] Completed and Returned to Top Screen.")
+
+    # ==========================================
+    # 3. ストレス (Stress) 取得フロー
+    # ==========================================
+    def collect_stress(self, days=config.DEFAULT_CAPTURE_DAYS):
+        print(f"\n==================================================")
+        print(f" [3/4] Stress Data Capture ({days} days)")
+        print(f"==================================================")
+        
+        print("[Stress] Tapping Stress Card (X=606, Y=1780)...")
+        self._run_adb(["shell", "input", "tap", "606", "1780"])
+        time.sleep(4.5)
+
+        save_dir = config.SCREENSHOTS_DIR / "stress"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        today = date.today()
+
+        for i in range(days):
+            target_date = today - timedelta(days=i)
+            date_str = target_date.strftime("%Y%m%d")
+
+            cx, cy = HealthCalendarPicker.get_date_coords(target_date)
+            print(f"[{i+1}/{days}] Selecting {target_date.strftime('%Y/%m/%d')} (Calendar Coords: X={cx}, Y={cy})")
+
+            self._run_adb(["shell", "input", "tap", "318", "374"])
+            time.sleep(2)
+
+            self._run_adb(["shell", "input", "tap", str(cx), str(cy)])
+            time.sleep(3)
+
+            filename = f"stress_{date_str}.png"
+            save_path = save_dir / filename
+            self.capture_screenshot(save_path)
+
+        self.back_to_top_gesture()
+        print(" [Stress] Completed and Returned to Top Screen.")
+
+    # ==========================================
+    # 4. 体組成 (Body Composition) 取得フロー
+    # ==========================================
+    def _get_past_body_comp_tap_info(self, days_ago):
+        """過去日（1日前以降）の履歴画面でのスクロール回数とタップY座標を算出"""
+        if days_ago <= 6:
+            y_coords = {1: 640, 2: 1016, 3: 1320, 4: 1630, 5: 1940, 6: 2250}
+            return 0, y_coords.get(days_ago, 640)
+        else:
+            offset_index = days_ago - 7
+            scroll_count = 1 + (offset_index // 6)
+            position_in_block = offset_index % 6
+            tap_y = 410 + position_in_block * 310
+            return scroll_count, tap_y
+
+    def collect_body_composition(self, days=config.DEFAULT_CAPTURE_DAYS):
+        print(f"\n==================================================")
+        print(f" [4/4] Body Composition Data Capture ({days} days)")
+        print("==================================================")
+        
+        save_dir = config.SCREENSHOTS_DIR / "body_composition"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        today = datetime.now()
+
+        # Step 1: トップ画面の体組成カードをタップ (X=200, Y=1650)
+        print("[Body Comp] Step 1: Tapping Body Composition Card (X=200, Y=1650)...")
+        self._run_adb(["shell", "input", "tap", "200", "1650"])
+        print("  Waiting 6 seconds for Weight Summary loading...")
+        time.sleep(6)
+
+        # Step 2: 「身体計測データ」カードをタップ (X=800, Y=950) -> 当日詳細画面が開く
+        print("[Body Comp] Step 2: Tapping Body Measurement Data (X=800, Y=950)...")
+        self._run_adb(["shell", "input", "tap", "800", "950"])
+        print("  Waiting 6 seconds for Target Body Data Detail Screen rendering...")
+        time.sleep(6)
+
+        # A. 当日 (0日前: 今日) の撮影
+        today_str = today.strftime("%Y%m%d")
+        print(f"\n[Body Comp Today] Capturing Today ({today.strftime('%Y/%m/%d')})...")
+        top_path = save_dir / f"body_composition_{today_str}_top.png"
+        self.capture_screenshot(top_path)
+
+        print("  Scrolling to detail bottom...")
+        self._run_adb(["shell", "input", "swipe", "800", "2000", "800", "500", "500"])
+        time.sleep(2.5)
+
+        bottom_path = save_dir / f"body_composition_{today_str}_bottom.png"
+        self.capture_screenshot(bottom_path)
+
+        # 当日のみの取得指示であれば、トップ画面へ戻って終了
+        if days <= 1:
+            print("[Body Comp] Finished Today capture. Returning to Top Screen...")
+            self.back_to_top_gesture()
+            self.back_to_top_gesture()
+            print(" [Body Comp] Completed and Returned to Top Screen.")
+            return
+
+        # B. 過去日 (1日前〜N-1日前) の取得: 右上「履歴」ボタン (X=1476, Y=159) を開く
+        print("\n[Body Comp History] Opening History List (X=1476, Y=159)...")
+        self._run_adb(["shell", "input", "tap", "1476", "159"])
+        time.sleep(3.5)
+
+        for days_ago in range(1, days):
+            target_date = today - timedelta(days=days_ago)
+            date_str = target_date.strftime("%Y%m%d")
+            date_fmt = target_date.strftime("%Y/%m/%d")
+
+            scroll_count, tap_y = self._get_past_body_comp_tap_info(days_ago)
+            print(f"\n[{days_ago+1}/{days}] Body Comp for {date_fmt} ({days_ago} days ago) -> Tap Y={tap_y}, Scrolls={scroll_count}")
+
+            for s in range(scroll_count):
+                print(f"  Scrolling history list ({s+1}/{scroll_count})...")
+                self._run_adb(["shell", "input", "swipe", "800", "2000", "800", "260", "1500"])
+                time.sleep(2.5)
+
+            print(f"  Tapping item row at (X=800, Y={tap_y})...")
+            self._run_adb(["shell", "input", "tap", "800", str(tap_y)])
+            print("  Waiting 5 seconds for detail rendering...")
+            time.sleep(5)
+
+            top_path = save_dir / f"body_composition_{date_str}_top.png"
+            self.capture_screenshot(top_path)
+
+            print("  Scrolling to detail bottom...")
+            self._run_adb(["shell", "input", "swipe", "800", "2000", "800", "500", "500"])
+            time.sleep(2.5)
+
+            bottom_path = save_dir / f"body_composition_{date_str}_bottom.png"
+            self.capture_screenshot(bottom_path)
+
+            print("  Returning to history list (BACK)...")
+            self._run_adb(["shell", "input", "keyevent", "4"])
+            time.sleep(2.5)
+
+        for _ in range(3):
             self._run_adb(["shell", "input", "keyevent", "4"])
             time.sleep(1)
 
-        print("\n All requested category screenshots captured successfully!")
+        print(" [Body Comp] Completed and Returned to Top Screen.")
+
+    # ==========================================
+    # 4大カテゴリ統合実行メソッド
+    # ==========================================
+    def collect_all_categories(self, days=config.DEFAULT_CAPTURE_DAYS):
+        """睡眠 -> 心機能 -> ストレス -> 体組成 の順序で全自動連続取得"""
+        if not self.check_connection():
+            raise RuntimeError(f"Device {self.device_id} is not connected via ADB.")
+
+        print("\n============================================================")
+        print(f" Starting 4-Major Health Data Auto-Collector ({days} days)")
+        print(f" Order: Sleep -> Heart Rate -> Stress -> Body Composition")
+        print("============================================================")
+
+        self.launch_app(config.PACKAGE_NAME)
+        self.collect_sleep(days=days)
+        self.collect_heart_rate(days=days)
+        self.collect_stress(days=days)
+        self.collect_body_composition(days=days)
+
+        print("\n============================================================")
+        print(f" All 4 Categories ({days} days) Successfully Captured!")
+        print("============================================================\n")
         return True
 
 if __name__ == "__main__":
     collector = ADBCollector()
-    collector.collect_days(days=1, category="sleep")
+    collector.collect_all_categories(days=1)

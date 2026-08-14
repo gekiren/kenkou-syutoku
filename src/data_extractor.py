@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from PIL import Image
@@ -11,14 +12,12 @@ class DataExtractor:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
 
     def _clean_json_string(self, text: str) -> str:
-        """Markdownのコードブロック (```json ... ```) を除外して純粋なJSON文字列を取得"""
         text = re.sub(r"^```json\s*", "", text, flags=re.MULTILINE)
         text = re.sub(r"^```\s*", "", text, flags=re.MULTILINE)
         text = re.sub(r"```$", "", text, flags=re.MULTILINE)
         return text.strip()
 
     def _get_prompt_for_image(self) -> str:
-        """多機能対応のプロンプト定義"""
         return """
         あなたはヘルスケアデータの専門AI解析エンジンです。
         添付されたHUAWEIヘルスアプリの画面（睡眠、血中酸素、ストレス、身体計測データ/体組成、心機能/心拍数）から、該当するカテゴリーを自動判別し、以下のJSON構造に従って抽出してください。
@@ -36,16 +35,16 @@ class DataExtractor:
         1. "sleep" の場合:
            "data": {
              "date": "YYYY-MM-DD",
-             "sleep_time_hours_mins": "例: 5時間55分",
-             "sleep_time_minutes_total": 整数 (例: 355),
-             "bed_time": "例: 23:38",
-             "wake_time": "例: 07:21",
-             "sleep_score": 整数 (例: 75),
-             "deep_sleep_hours_mins": "例: 1時間32分",
-             "shallow_sleep_hours_mins": "例: 3時間55分",
-             "rem_sleep_hours_mins": "例: 28分",
+             "sleep_time_hours_mins": "例: 8時間23分",
+             "sleep_time_minutes_total": 整数 (例: 503),
+             "bed_time": "例: 23:29",
+             "wake_time": "例: 08:07",
+             "sleep_score": 整数 (例: 84),
+             "deep_sleep_hours_mins": "例: 1時間55分",
+             "shallow_sleep_hours_mins": "例: 4時間57分",
+             "rem_sleep_hours_mins": "例: 1時間31分",
              "awake_hours_mins": "例: 0分",
-             "deep_sleep_score": 整数またはnull
+             "deep_sleep_score": 整数またはnull (例: 52)
            }
 
         2. "spo2" (血中酸素) の場合:
@@ -75,25 +74,25 @@ class DataExtractor:
         4. "body_composition" (体組成) の場合:
            "data": {
              "date": "YYYY-MM-DD",
-             "weight_kg": 数値 (例: 67.8),
-             "weight_diff_kg": 数値またはnull (例: -0.3),
-             "bmi": 数値 (例: 21.7),
-             "body_fat_percent": 数値 (例: 17.4),
-             "skeletal_muscle_mass_kg": 数値 (例: 29.8),
+             "weight_kg": 数値 (例: 66.6),
+             "weight_diff_kg": 数値またはnull (例: -0.7),
+             "bmi": 数値 (例: 21.5),
+             "body_fat_percent": 数値 (例: 17.6),
+             "skeletal_muscle_mass_kg": 数値 (例: 29.2),
              "visceral_fat_level": 数値 (例: 6.0),
-             "skeletal_muscle_index_kg_m2": 数値またはnull (例: 7.5),
+             "skeletal_muscle_index_kg_m2": 数値またはnull (例: 7.3),
              "waist_hip_ratio": 数値またはnull (例: 0.86),
              "body_type": "例: バナナ",
-             "basal_metabolism_kcal": 整数 (例: 1579),
-             "body_water_percent": 数値 (例: 60.6),
-             "bone_salt_mass_kg": 数値 (例: 2.94),
+             "basal_metabolism_kcal": 整数 (例: 1559),
+             "body_water_percent": 数値 (例: 60.4),
+             "bone_salt_mass_kg": 数値 (例: 2.89),
              "protein_percent": 数値 (例: 17.7),
-             "fat_free_mass_kg": 数値 (例: 56.0),
+             "fat_free_mass_kg": 数値 (例: 54.9),
              "body_age": 整数 (例: 29),
-             "resting_heart_rate_bpm": 整数 (例: 75),
-             "body_fat_mass_kg": 数値またはnull (例: 11.8),
-             "water_mass_kg": 数値またはnull (例: 41.09),
-             "protein_mass_kg": 数値またはnull (例: 11.97)
+             "resting_heart_rate_bpm": 整数 (例: 81),
+             "body_fat_mass_kg": 数値またはnull (例: 11.7),
+             "water_mass_kg": 数値またはnull (例: 40.23),
+             "protein_mass_kg": 数値またはnull (例: 11.76)
            }
 
         5. "heart_rate" (心拍数) の場合:
@@ -115,14 +114,12 @@ class DataExtractor:
         """
 
     def _extract_date_from_filename(self, filename: str) -> str:
-        """ファイル名から YYYYMMDD を探して YYYY-MM-DD 形式で返す"""
         match = re.search(r"(\d{4})(\d{2})(\d{2})", filename)
         if match:
             return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
-        return "2026-08-14"
+        return datetime.now().strftime("%Y-%m-%d")
 
     def _extract_category_from_filename(self, filename: str) -> str:
-        """ファイル名からカテゴリを識別"""
         name = filename.lower()
         for cat in config.CATEGORIES:
             if cat in name:
@@ -130,7 +127,6 @@ class DataExtractor:
         return "sleep"
 
     def _generate_mock_data(self, image_path: Path) -> dict:
-        """APIキー未セット時または失敗時のスタブデータ（ファイル名の日付を正確に反映）"""
         name = image_path.name.lower()
         file_date = self._extract_date_from_filename(name)
 
@@ -169,25 +165,25 @@ class DataExtractor:
                 "category": "body_composition",
                 "data": {
                     "date": file_date,
-                    "weight_kg": 67.8,
-                    "weight_diff_kg": -0.3,
-                    "bmi": 21.7,
-                    "body_fat_percent": 17.4,
-                    "skeletal_muscle_mass_kg": 29.8,
+                    "weight_kg": 66.6,
+                    "weight_diff_kg": -0.7,
+                    "bmi": 21.5,
+                    "body_fat_percent": 17.6,
+                    "skeletal_muscle_mass_kg": 29.2,
                     "visceral_fat_level": 6.0,
-                    "skeletal_muscle_index_kg_m2": 7.5,
+                    "skeletal_muscle_index_kg_m2": 7.3,
                     "waist_hip_ratio": 0.86,
                     "body_type": "バナナ",
-                    "basal_metabolism_kcal": 1579,
-                    "body_water_percent": 60.6,
-                    "bone_salt_mass_kg": 2.94,
+                    "basal_metabolism_kcal": 1559,
+                    "body_water_percent": 60.4,
+                    "bone_salt_mass_kg": 2.89,
                     "protein_percent": 17.7,
-                    "fat_free_mass_kg": 56.0,
+                    "fat_free_mass_kg": 54.9,
                     "body_age": 29,
-                    "resting_heart_rate_bpm": 75,
-                    "body_fat_mass_kg": 11.8,
-                    "water_mass_kg": 41.09,
-                    "protein_mass_kg": 11.97
+                    "resting_heart_rate_bpm": 81,
+                    "body_fat_mass_kg": 11.7,
+                    "water_mass_kg": 40.23,
+                    "protein_mass_kg": 11.76
                 },
                 "image_source": image_path.name
             }
@@ -210,35 +206,33 @@ class DataExtractor:
                 "category": "sleep",
                 "data": {
                     "date": file_date,
-                    "sleep_time_hours_mins": "5時間55分",
-                    "sleep_time_minutes_total": 355,
-                    "bed_time": "23:38",
-                    "wake_time": "07:21",
-                    "sleep_score": 75,
-                    "deep_sleep_hours_mins": "1時間32分",
-                    "shallow_sleep_hours_mins": "3時間55分",
-                    "rem_sleep_hours_mins": "28分",
+                    "sleep_time_hours_mins": "8時間23分",
+                    "sleep_time_minutes_total": 503,
+                    "bed_time": "23:29",
+                    "wake_time": "08:07",
+                    "sleep_score": 84,
+                    "deep_sleep_hours_mins": "1時間55分",
+                    "shallow_sleep_hours_mins": "4時間57分",
+                    "rem_sleep_hours_mins": "1時間31分",
                     "awake_hours_mins": "0分",
-                    "deep_sleep_score": 67
+                    "deep_sleep_score": 52
                 },
                 "image_source": image_path.name
             }
 
-
-    def extract_from_image(self, image_path: Path, retries=2) -> dict:
-        """スクリーンショット画像から数値をAI自動判別・構造化パース (多重自動フォールバック構成)"""
+    def extract_from_image(self, image_path: Path) -> dict:
+        """スクリーンショット画像から数値をAI自動判別・構造化パース (Gemini 3.7 Flash & 高速フォールバック)"""
         if not image_path.exists():
             raise FileNotFoundError(f"Image file not found: {image_path}")
 
-        # 画像が真っ黒(画面消灯時)でないかの視覚判定
         try:
             img_check = Image.open(image_path).convert("L")
             extrema = img_check.getextrema()
             if extrema == (0, 0) or extrema[1] < 10:
-                print(f"[Extractor Warning] {image_path.name} is a BLACK screen image! (Screen was off or locked)")
+                print(f"[Extractor Warning] {image_path.name} is a BLACK screen image!")
                 return {
                     "category": self._extract_category_from_filename(image_path.name),
-                    "error": "Black Image (Screen was off or locked during ADB capture)",
+                    "error": "Black Image",
                     "data": None,
                     "image_source": image_path.name
                 }
@@ -248,84 +242,156 @@ class DataExtractor:
         prompt = self._get_prompt_for_image()
 
         if not self.api_key:
-            print(f"[Warning] GEMINI_API_KEY missing for {image_path.name}. Using smart mock parser.")
+            print(f"[Warning] GEMINI_API_KEY missing for {image_path.name}. Using mock parser.")
             return self._generate_mock_data(image_path)
 
-        # AI_MODEL_FALLBACK_RULES.md に基づく多重フォールバック優先順位リスト
         fallback_models = [
+            "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite"
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
         ]
 
         last_error = None
         for model_name in fallback_models:
-            for attempt in range(retries):
-                try:
-                    from google import genai
-                    client = genai.Client(api_key=self.api_key)
-                    img = Image.open(image_path)
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[prompt, img]
-                    )
-                    raw_text = response.text
+            try:
+                from google import genai
+                client = genai.Client(api_key=self.api_key)
+                img = Image.open(image_path)
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt, img]
+                )
+                raw_text = response.text
 
-                    clean_json = self._clean_json_string(raw_text)
-                    parsed = json.loads(clean_json)
-                    parsed["image_source"] = image_path.name
+                clean_json = self._clean_json_string(raw_text)
+                parsed = json.loads(clean_json)
+                parsed["image_source"] = image_path.name
 
-                    # ファイル名から抽出した正しい日付で補正
-                    file_date = self._extract_date_from_filename(image_path.name)
-                    if "data" in parsed and isinstance(parsed["data"], dict):
-                        if not parsed["data"].get("date") or parsed["data"].get("date") == "null":
-                            parsed["data"]["date"] = file_date
-                    
-                    print(f"   Success with model [{model_name}]: {image_path.name}")
-                    time.sleep(1)  # レートリミット対策の微少ウェイト
-                    return parsed
+                file_date = self._extract_date_from_filename(image_path.name)
+                if "data" in parsed and isinstance(parsed["data"], dict):
+                    if not parsed["data"].get("date") or parsed["data"].get("date") == "null":
+                        parsed["data"]["date"] = file_date
+                
+                print(f"   Success with model [{model_name}]: {image_path.name}")
+                return parsed
 
-                except Exception as e:
-                    last_error = str(e)
-                    print(f"   [Model Fallback Notice] Model {model_name} attempt {attempt+1} failed: {e}. Trying next...")
-                    time.sleep(2)
+            except Exception as e:
+                last_error = str(e)
+                print(f"   [Model Fallback] {model_name} unavailable ({type(e).__name__}). Switching immediately...")
 
         print(f"[Extractor Error] All model fallbacks failed for {image_path.name}: {last_error}")
         fallback_data = self._generate_mock_data(image_path)
         fallback_data["error"] = f"All Fallback Models Failed: {last_error}"
         return fallback_data
 
+    def _move_to_processed(self, file_path: Path):
+        """解析完了した画像ファイルを processed フォルダへ移動"""
+        try:
+            processed_dir = file_path.parent / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            dest_path = processed_dir / file_path.name
+            shutil.move(str(file_path), str(dest_path))
+            print(f"   [Archived] Moved {file_path.name} -> processed/")
+        except Exception as e:
+            print(f"[Archive Error] Could not move {file_path.name}: {e}")
 
     def process_all_screenshots(self, input_dir=config.SCREENSHOTS_DIR, output_dir=config.JSON_DIR) -> list:
-        """screenshots 配下の全画像（サブフォルダ含む）を解析しJSONへ保存"""
-        image_files = list(input_dir.glob("*.png")) + list(input_dir.rglob("*.png"))
-        # 重複除去
+        """各カテゴリフォルダ直下の未解析画像のみを解析し、完了後に processed/ フォルダへ移動"""
+        date_pattern = re.compile(r"\d{8}")
+        image_files = []
+
+        for cat in config.CATEGORIES:
+            cat_dir = input_dir / cat
+            if cat_dir.exists():
+                for p in cat_dir.glob("*.png"):
+                    if p.is_file() and date_pattern.search(p.name):
+                        image_files.append(p)
+
         image_files = sorted(list(set(image_files)))
-        
-        print(f"\n Found {len(image_files)} screenshots to analyze in {input_dir.name}...")
-        
+        print(f"\n Found {len(image_files)} unanalyzed screenshot(s) to process...")
+
+        body_comp_pairs = {}
+        standard_images = []
+
+        for img in image_files:
+            name = img.name.lower()
+            if "body_composition" in name or "body_" in name:
+                date_str = self._extract_date_from_filename(name)
+                if date_str not in body_comp_pairs:
+                    body_comp_pairs[date_str] = {}
+                if "top" in name:
+                    body_comp_pairs[date_str]["top"] = img
+                elif "bottom" in name:
+                    body_comp_pairs[date_str]["bottom"] = img
+                else:
+                    body_comp_pairs[date_str]["single"] = img
+            else:
+                standard_images.append(img)
+
         extracted_results = []
-        for img_file in image_files:
-            print(f" Processing Vision AI analysis: {img_file.name}...")
+
+        # 1. 通常画像の解析 (睡眠、心機能、ストレス等)
+        for img_file in standard_images:
+            print(f"\n Processing Vision AI analysis: {img_file.name}...")
             result = self.extract_from_image(img_file)
+            category = result.get("category") or self._extract_category_from_filename(img_file.name)
             
-            category = result.get("category") or "sleep"
             cat_json_dir = output_dir / category
             cat_json_dir.mkdir(parents=True, exist_ok=True)
             
-            json_filename = img_file.stem + ".json"
-            json_path = cat_json_dir / json_filename
-            
+            json_path = cat_json_dir / (img_file.stem + ".json")
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
-            
             print(f"   Saved [{category.upper()}] JSON: {json_path.name}")
+            
+            self._move_to_processed(img_file)
             extracted_results.append(result)
+
+        # 2. 体組成画像の解析・マージ統合
+        for date_str, parts in body_comp_pairs.items():
+            print(f"\n Processing Body Composition Data for [{date_str}]...")
+            merged_data = {}
+            sources = []
+            files_to_move = []
+
+            for part_key in ["top", "bottom", "single"]:
+                if part_key in parts:
+                    part_file = parts[part_key]
+                    print(f"   Analyzing {part_key} part: {part_file.name}...")
+                    part_result = self.extract_from_image(part_file)
+                    sources.append(part_file.name)
+                    files_to_move.append(part_file)
+                    if part_result.get("data") and isinstance(part_result["data"], dict):
+                        for k, v in part_result["data"].items():
+                            if v is not None and v != "null" and v != "":
+                                merged_data[k] = v
+
+            merged_data["date"] = date_str
+            final_result = {
+                "category": "body_composition",
+                "data": merged_data,
+                "image_sources": sources
+            }
+
+            cat_json_dir = output_dir / "body_composition"
+            cat_json_dir.mkdir(parents=True, exist_ok=True)
+            clean_date = date_str.replace("-", "")
+            json_path = cat_json_dir / f"body_composition_{clean_date}.json"
+
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(final_result, f, ensure_ascii=False, indent=2)
+            print(f"   Saved Integrated Body Composition JSON: {json_path.name}")
+
+            for pf in files_to_move:
+                self._move_to_processed(pf)
+
+            extracted_results.append(final_result)
 
         return extracted_results
 
 if __name__ == "__main__":
     extractor = DataExtractor()
     results = extractor.process_all_screenshots()
-    print(f"Extraction Completed for {len(results)} images.")
+    print(f"\n Extraction Completed for {len(results)} items.")
