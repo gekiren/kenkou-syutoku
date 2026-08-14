@@ -1,46 +1,41 @@
 # 会話引き継ぎサマリー (Handover Summary)
 
----
-
-## 1. 確立・確定した実績 (Accomplishments & Confirmed Procedures)
-
-### ① 画面ロック解除 & アプリ安定起動（確定済み）
-- デバイス: HarmonyOSタブレット (`QBK6R20519000806`, 解像度 `1600x2560`)
-- 画面点灯: `input keyevent 224` (KEYCODE_WAKEUP) を使用して画面を安定点灯。
-- スリープ防止: ADB `screen_off_timeout` を 30分 (1800000ms) に設定。
-
-### ② 体組成データ（7日以前・過去日）自動取得（確定済み！）
-- 慣性なし等速スワイプ: 移動量 `1740 px` (`290 px × 6日分`)、時間 `1500 ms`
-- 7日前実測: `X = 800, Y = 410` / 8日前実測: `X = 800, Y = 720`
-
-### ③ 心拍（心機能）データ全自動取得（確定済み！）
-- **確定タップ座標**: **`X = 1015, Y = 1248`**
-- **キャプチャ仕様**: **縦スクロール不要（1日1枚で全データ完結）**
-- **過去日移動**: 詳細画面内で左から右へスワイプ (`input swipe 300 1000 1300 1000 300`)
-
-### ④ ストレス（情緒）データ全自動取得（動的カレンダー計算モデル確立！）
-- **確定タップ座標**: **`X = 606, Y = 1780`**
-- **日付選択ロジック**:
-  - ストレス画面はスワイプによる日付変更に対応していないため、カレンダー選択方式を採用。
-  - 日付ドロップダウン（`X = 318, Y = 374`）をタップしてカレンダーを開く。
-  - [src/calendar_picker.py](file:///c:/KENKOU%20SYUTOKU/src/calendar_picker.py) により、指定した年月日の曜日・第何週かを基に**カレンダー上のセル座標 (X, Y) を毎日・毎月動的に数学計算**。
-    - `X(col) = 279 + col * 173` (col: 0=日 〜 6=土)
-    - `Y(row) = 1517 + row * 173` (row: 第1週=0 〜 第6週=5)
-- **実績**: 直近3日間（8/14, 8/13, 8/12）の自動連続取得に完全成功！
-- **GitHub同期**: リポジトリ `https://github.com/gekiren/kenkou-syutoku.git` の `master` ブランチにコミット・Push済み！
+本ドキュメントは、HUAWEIヘルスケアアプリからの4大健康データ（**睡眠・体組成・心機能・ストレス**）の自動取得手順の確立実績と、次のセッションで実施する「4要素一括統合取得スクリプト」の設計・実装方針をまとめたものです。
 
 ---
 
-## 2. 確定スクリプト & 関連ファイル (Files & Code)
+## 1. 確立・確定した4大健康データの取得仕様 (Confirmed Specifications)
 
-- [src/calendar_picker.py](file:///c:/KENKOU%20SYUTOKU/src/calendar_picker.py): カレンダー動的座標自動計算モジュール
-- [capture_stress_days.py](file:///c:/KENKOU%20SYUTOKU/capture_stress_days.py): カレンダー動的計算によるストレスN日間自動一括収集スクリプト
-- [capture_heart_rate_days.py](file:///c:/KENKOU%20SYUTOKU/capture_heart_rate_days.py): N日数分心拍データ全自動取得スクリプト
-- [capture_7days_and_8days_real_coords.py](file:///c:/KENKOU%20SYUTOKU/capture_7days_and_8days_real_coords.py): 体組成過去データ自動取得決定版
+| データカテゴリ | トップ画面タップ座標 (X, Y) | 撮影仕様 | 過去日ナビゲーション方式 | 確定スクリプト / モジュール |
+| :--- | :--- | :--- | :--- | :--- |
+| **① 睡眠 (Sleep)** | `X = 1350, Y = 1150` | 1日1枚 (スクロール不要) | スワイプ方式 (左 ➔ 右: `input swipe 300 1000 1300 1000 300`) | [src/adb_collector.py](file:///c:/KENKOU%20SYUTOKU/src/adb_collector.py) |
+| **② 体組成 (Body Comp)** | `X = 200, Y = 1650`<br>➔ 身体計測 `X=800, Y=950`<br>➔ 履歴 `X=1476, Y=159` | 上部・下部 2枚分割撮影<br>(スクロール移動 `Y: 2000->500`) | 履歴リスト等速スワイプ (`1740px, 1500ms`)<br>7日前実測: `X=800, Y=410`<br>8日前実測: `X=800, Y=720` | [capture_7days_and_8days_real_coords.py](file:///c:/KENKOU%20SYUTOKU/capture_7days_and_8days_real_coords.py) |
+| **③ 心機能 (Heart Rate)** | `X = 1015, Y = 1248` | 1日1枚 (スクロール不要) | スワイプ方式 (左 ➔ 右: `input swipe 300 1000 1300 1000 300`) | [capture_heart_rate_days.py](file:///c:/KENKOU%20SYUTOKU/capture_heart_rate_days.py) |
+| **④ ストレス (Stress)** | `X = 606, Y = 1780` | 1日1枚 (スクロール不要) | カレンダー動的座標計算方式<br>日付ドロップダウン `X=318, Y=374`<br>動的計算: `X(col)=279+col*173`, `Y(row)=1517+row*173` | [src/calendar_picker.py](file:///c:/KENKOU%20SYUTOKU/src/calendar_picker.py)<br>[capture_stress_days.py](file:///c:/KENKOU%20SYUTOKU/capture_stress_days.py) |
 
 ---
 
-## 3. 次のセッションで行う作業 (Next Steps)
+## 2. 共通のデバイス制御・安定起動仕様 (Device Control)
 
-- 「血中酸素（SpO2）」や「睡眠」など残りのデータカテゴリの取得手順確立
-- または、全自動収集メインスクリプト（`main.py`）への全カテゴリ自動取得処理の統合
+- **対象デバイス**: HarmonyOSタブレット (`QBK6R20519000806`, 解像度 `1600x2560`)
+- **画面点灯**: `input keyevent 224` (KEYCODE_WAKEUP) を使用（画面が消えている場合のみ点灯）
+- **ロック解除**: `input swipe 800 2000 800 500 200`
+- **スリープ防止**: `settings put system screen_off_timeout 1800000` (30分)
+- **クリーン起動**: `am force-stop com.huawei.health` ➔ `monkey -p com.huawei.health -c android.intent.category.LAUNCHER 1` ➔ 5秒待機
+
+---
+
+## 3. 次のセッションで最初に行う作業 (Next Action Plan)
+
+1. **4大カテゴリ（睡眠、体組成、心機能、ストレス）の全自動一括収集メインスクリプトの作成**:
+   - `capture_all_health_data.py`（または `main.py` のパイプライン拡張）を実装。
+   - コマンドライン引数 `--days N`（例: `--days 7`）で、4カテゴリすべての過去N日分のスクリーンショットを一発で全自動収集・整理保存するフローを構築。
+2. **Vision AI（Gemini / DeepSeek）によるOCR・データ構造化抽出パイプラインの動作検証**:
+   - 撮影された各カテゴリのスクリーンショットから数値を抽出し、JSONおよび統合レポートを作成する処理の結合テスト。
+
+---
+
+## 4. Gitリポジトリ状態 (Git Status)
+- リポジトリ: `https://github.com/gekiren/kenkou-syutoku.git`
+- ブランチ: `master`
+- 最新コミット: `837591a` (すべてのスクリプト・設定が同期済み)
