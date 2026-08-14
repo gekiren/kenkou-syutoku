@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Screenshots & Local Data Output (必要に応じて保存)
+data/screenshots/
+data/json/
+data/output/
+*.png
+
+# Antigravity / Gemin / IDE
+.gemini/
+.idea/
+.vscode/
