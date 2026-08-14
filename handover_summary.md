@@ -1,41 +1,29 @@
 # 会話引き継ぎサマリー (Handover Summary)
 
-本ドキュメントは、HUAWEIヘルスケアアプリからの4大健康データ（**睡眠・体組成・心機能・ストレス**）の自動取得手順の確立実績と、次のセッションで実施する「4要素一括統合取得スクリプト」の設計・実装方針をまとめたものです。
+本ドキュメントは、HUAWEIヘルスケアアプリからの4大健康データ（**睡眠・心機能・ストレス・体組成**）の全自動一括収集＆AI解析パイプラインの統合完了実績と、Gitリポジトリ（master）への同期状態をまとめたものです。
 
 ---
 
-## 1. 確立・確定した4大健康データの取得仕様 (Confirmed Specifications)
+## 1. 確立・実装完了したシステム仕様 (System Specifications)
 
-| データカテゴリ | トップ画面タップ座標 (X, Y) | 撮影仕様 | 過去日ナビゲーション方式 | 確定スクリプト / モジュール |
-| :--- | :--- | :--- | :--- | :--- |
-| **① 睡眠 (Sleep)** | `X = 1350, Y = 1150` | 1日1枚 (スクロール不要) | スワイプ方式 (左 ➔ 右: `input swipe 300 1000 1300 1000 300`) | [src/adb_collector.py](file:///c:/KENKOU%20SYUTOKU/src/adb_collector.py) |
-| **② 体組成 (Body Comp)** | `X = 200, Y = 1650`<br>➔ 身体計測 `X=800, Y=950`<br>➔ 履歴 `X=1476, Y=159` | 上部・下部 2枚分割撮影<br>(スクロール移動 `Y: 2000->500`) | 履歴リスト等速スワイプ (`1740px, 1500ms`)<br>7日前実測: `X=800, Y=410`<br>8日前実測: `X=800, Y=720` | [capture_7days_and_8days_real_coords.py](file:///c:/KENKOU%20SYUTOKU/capture_7days_and_8days_real_coords.py) |
-| **③ 心機能 (Heart Rate)** | `X = 1015, Y = 1248` | 1日1枚 (スクロール不要) | スワイプ方式 (左 ➔ 右: `input swipe 300 1000 1300 1000 300`) | [capture_heart_rate_days.py](file:///c:/KENKOU%20SYUTOKU/capture_heart_rate_days.py) |
-| **④ ストレス (Stress)** | `X = 606, Y = 1780` | 1日1枚 (スクロール不要) | カレンダー動的座標計算方式<br>日付ドロップダウン `X=318, Y=374`<br>動的計算: `X(col)=279+col*173`, `Y(row)=1517+row*173` | [src/calendar_picker.py](file:///c:/KENKOU%20SYUTOKU/src/calendar_picker.py)<br>[capture_stress_days.py](file:///c:/KENKOU%20SYUTOKU/capture_stress_days.py) |
-
----
-
-## 2. 共通のデバイス制御・安定起動仕様 (Device Control)
-
-- **対象デバイス**: HarmonyOSタブレット (`QBK6R20519000806`, 解像度 `1600x2560`)
-- **画面点灯**: `input keyevent 224` (KEYCODE_WAKEUP) を使用（画面が消えている場合のみ点灯）
-- **ロック解除**: `input swipe 800 2000 800 500 200`
-- **スリープ防止**: `settings put system screen_off_timeout 1800000` (30分)
-- **クリーン起動**: `am force-stop com.huawei.health` ➔ `monkey -p com.huawei.health -c android.intent.category.LAUNCHER 1` ➔ 5秒待機
+| 機能モジュール | 実装スクリプト | 機能概要・仕様 |
+| :--- | :--- | :--- |
+| **① 4大健康データ一括収集** | [capture_all_health_data.py](file:///c:/KENKOU%20SYUTOKU/capture_all_health_data.py)<br>[src/adb_collector.py](file:///c:/KENKOU%20SYUTOKU/src/adb_collector.py) | **順序**: 睡眠 ➔ 心機能 ➔ ストレス ➔ 体組成<br>**画面復帰**: 右端スワイプ（戻るジェスチャー）でタスクキルを行わず高速連続遷移。<br>**体組成分岐**: 当日（直接詳細画面撮影）／過去日（履歴リスト経由）の自動切り替え＆描画待機（6秒）。 |
+| **② Vision AI解析＆アーカイブ** | [src/data_extractor.py](file:///c:/KENKOU%20SYUTOKU/src/data_extractor.py) | **プライマリモデル**: `gemini-3.7-flash`<br>**フォールバック**: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`<br>**上下画像マージ**: 体組成の `_top` / `_bottom` を自動統合。<br>**アーカイブ**: 解析完了画像を各カテゴリ内の `processed/` フォルダへ自動移動。 |
+| **③ 統合レポート生成** | [src/report_generator.py](file:///c:/KENKOU%20SYUTOKU/src/report_generator.py)<br>[main.py](file:///c:/KENKOU%20SYUTOKU/main.py) | Markdownサマリー（`health_summary_report.md`）、マルチシートExcel（`all_health_data.xlsx`）、統合CSV（`all_health_data.csv`）を自動生成。 |
 
 ---
 
-## 3. 次のセッションで最初に行う作業 (Next Action Plan)
-
-1. **4大カテゴリ（睡眠、体組成、心機能、ストレス）の全自動一括収集メインスクリプトの作成**:
-   - `capture_all_health_data.py`（または `main.py` のパイプライン拡張）を実装。
-   - コマンドライン引数 `--days N`（例: `--days 7`）で、4カテゴリすべての過去N日分のスクリーンショットを一発で全自動収集・整理保存するフローを構築。
-2. **Vision AI（Gemini / DeepSeek）によるOCR・データ構造化抽出パイプラインの動作検証**:
-   - 撮影された各カテゴリのスクリーンショットから数値を抽出し、JSONおよび統合レポートを作成する処理の結合テスト。
+## 2. 実機撮影・解析実績 (2026年8月14日)
+- **睡眠**: スコア 84点 / 睡眠時間 8時間23分 (深い睡眠 1h55m / 浅い睡眠 4h57m / レム 1h31m)
+- **心機能**: 安静時 60 bpm / 最新 66 bpm / 範囲 50〜115 bpm
+- **ストレス**: 平均スコア 30 (正常・安定) / 最新 47
+- **体組成**: 体重 66.6 kg / BMI 21.5 / 体脂肪率 17.6% / 骨格筋量 29.2 kg / 内臓脂肪 6.0 / 基礎代謝 1,559 kcal / 水分率 60.4% / 骨塩量 2.89 kg / 体年齢 29歳
 
 ---
 
-## 4. Gitリポジトリ状態 (Git Status)
+## 3. Gitリポジトリ状態 (Git Status)
 - リポジトリ: `https://github.com/gekiren/kenkou-syutoku.git`
 - ブランチ: `master`
-- 最新コミット: `837591a` (すべてのスクリプト・設定が同期済み)
+- 最新コミット: `f6ddb85` (feat: 4大健康データ全自動一括収集＆Gemini 3.7 Flash解析パイプラインの統合実装)
+- 全変更が `origin/master` に同期済み。

@@ -1,4 +1,5 @@
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -167,10 +168,228 @@ class ReportGenerator:
         print(f" Saved Integrated Markdown report: {md_path.name}")
         return md_path
 
+    def export_to_obsidian(self, cat_records: dict):
+        """Obsidian Vault (KENKOU SYUTOKU) へ日別ノート・ダッシュボード・データファイルを出力する"""
+        obs_dir   = config.OBSIDIAN_OUTPUT_DIR
+        daily_dir = config.OBSIDIAN_DAILY_DIR
+        data_dir  = config.OBSIDIAN_DATA_DIR
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # --- (A) 日別ノートの生成 ----------------------------------------
+        # 全カテゴリの日付を列挙
+        dates_set = set()
+        for cat, records in cat_records.items():
+            for r in records:
+                d = r.get("date")
+                if d:
+                    dates_set.add(str(d))
+
+        for date_str in sorted(dates_set):
+            lines = []
+            lines.append("---")
+            lines.append(f"tags: [health, huawei, lifelog, kenkou-syutoku]")
+            lines.append(f"date: {date_str}")
+            lines.append(f"updated: {now_str}")
+            lines.append("---")
+            lines.append(f"")
+            lines.append(f"# 📊 {date_str} 健康記録")
+            lines.append(f"")
+
+            # 1. 睡眠
+            sleep_recs = [r for r in cat_records.get("sleep", []) if str(r.get("date","")) == date_str]
+            lines.append("## 😴 睡眠 (Sleep)")
+            if sleep_recs:
+                r = sleep_recs[0]
+                lines.append(f"| 項目 | 値 |")
+                lines.append(f"|---|---|")
+                lines.append(f"| 睡眠スコア | **{r.get('sleep_score', '-')} 点** |")
+                lines.append(f"| 睡眠時間 | {r.get('sleep_time_hours_mins', '-')} |")
+                lines.append(f"| 就寢時刻 | {r.get('bed_time', '-')} |")
+                lines.append(f"| 起床時刻 | {r.get('wake_time', '-')} |")
+                lines.append(f"| 深い睡眠 | {r.get('deep_sleep_hours_mins', '-')} |")
+                lines.append(f"| 浅い睡眠 | {r.get('shallow_sleep_hours_mins', '-')} |")
+                lines.append(f"| レム睡眠 | {r.get('rem_sleep_hours_mins', '-')} |")
+            else:
+                lines.append("> [!NOTE] 睡眠データなし")
+            lines.append("")
+
+            # 2. 心拍数
+            hr_recs = [r for r in cat_records.get("heart_rate", []) if str(r.get("date","")) == date_str]
+            lines.append("## ❤️ 心拍数 (Heart Rate)")
+            if hr_recs:
+                r = hr_recs[0]
+                lines.append(f"| 項目 | 値 |")
+                lines.append(f"|---|---|")
+                lines.append(f"| 安靜時心拍数 | **{r.get('resting_heart_rate_bpm', '-')} bpm** |")
+                lines.append(f"| 最新心拍数 | {r.get('latest_heart_rate_bpm', '-')} bpm |")
+                lines.append(f"| 心拍数範囲 | {r.get('min_heart_rate_bpm', '-')}～{r.get('max_heart_rate_bpm', '-')} bpm |")
+                lines.append(f"| 1日平均安靜時 | {r.get('daily_avg_resting_heart_rate_bpm', '-')} bpm |")
+            else:
+                lines.append("> [!NOTE] 心拍数データなし")
+            lines.append("")
+
+            # 3. ストレス
+            stress_recs = [r for r in cat_records.get("stress", []) if str(r.get("date","")) == date_str]
+            lines.append("## 🧠 ストレス (Stress)")
+            if stress_recs:
+                r = stress_recs[0]
+                lines.append(f"| 項目 | 値 |")
+                lines.append(f"|---|---|")
+                lines.append(f"| 平均ストレススコア | **{r.get('average_stress_score', '-')}** |")
+                lines.append(f"| 状態判定 | {r.get('average_stress_level', '-')} |")
+                lines.append(f"| 最新スコア | {r.get('latest_stress_score', '-')} |")
+                lines.append(f"| 正常割合 | {r.get('normal_percentage', '-')}% |")
+            else:
+                lines.append("> [!NOTE] ストレスデータなし")
+            lines.append("")
+
+            # 4. 体組成
+            body_recs = [r for r in cat_records.get("body_composition", []) if str(r.get("date","")) == date_str]
+            lines.append("## ⚖️ 体組成 (Body Composition)")
+            if body_recs:
+                r = body_recs[0]
+                lines.append(f"| 項目 | 値 |")
+                lines.append(f"|---|---|")
+                lines.append(f"| 体重 | **{r.get('weight_kg', '-')} kg** |")
+                lines.append(f"| BMI | {r.get('bmi', '-')} |")
+                lines.append(f"| 体脂肪率 | {r.get('body_fat_percent', '-')}% |")
+                lines.append(f"| 骨格筋量 | {r.get('skeletal_muscle_mass_kg', '-')} kg |")
+                lines.append(f"| 内臓脂肪 | {r.get('visceral_fat_level', '-')} |")
+                lines.append(f"| 基礎代謝 | {r.get('basal_metabolism_kcal', '-')} kcal |")
+                lines.append(f"| 体内水分率 | {r.get('body_water_percent', '-')}% |")
+                lines.append(f"| 骨塩量 | {r.get('bone_mass_kg', '-')} kg |")
+                lines.append(f"| 体年齢 | {r.get('body_age', '-')}歳 |")
+            else:
+                lines.append("> [!NOTE] 体組成データなし")
+            lines.append("")
+
+            # 5. SpO2
+            spo2_recs = [r for r in cat_records.get("spo2", []) if str(r.get("date","")) == date_str]
+            lines.append("## 🫁 血中酸素 (SpO2)")
+            if spo2_recs:
+                r = spo2_recs[0]
+                lines.append(f"| 項目 | 値 |")
+                lines.append(f"|---|---|")
+                lines.append(f"| 平均血中酸素濃度 | **{r.get('average_spo2_percent', '-')}%** |")
+                lines.append(f"| 最新測定値 | {r.get('latest_spo2_percent', '-')}% |")
+            else:
+                lines.append("> [!NOTE] SpO2データなし")
+            lines.append("")
+
+            note_path = daily_dir / f"{date_str}_健康記録.md"
+            note_path.write_text("\n".join(lines), encoding="utf-8")
+            print(f" [Obsidian] 日別ノート 保存: {note_path.name}")
+
+        # --- (B) 総合ダッシュボードの生成 ----------------------------------
+        dashboard_path = obs_dir / "00_総合健康ダッシュボード.md"
+        dash = []
+        dash.append("---")
+        dash.append("tags: [health, huawei, lifelog, kenkou-syutoku, dashboard]")
+        dash.append(f"updated: {now_str}")
+        dash.append("---")
+        dash.append("")
+        dash.append("# 🏥 HUAWEI ヘルスケア 総合健康ダッシュボード")
+        dash.append(f"> **最終更新**: `{now_str}`")
+        dash.append("")
+        dash.append("> [!TIP] 日別記録は [[Daily/]] フォルダに保存されます。")
+        dash.append("")
+        dash.append("---")
+
+        # 各カテゴリの最新データサマリー
+        dash.append("## 📈 直近最新データ")
+        dash.append("")
+
+        def latest_record(records):
+            sorted_recs = sorted(
+                [r for r in records if r.get("date")],
+                key=lambda x: str(x.get("date", "")),
+                reverse=True
+            )
+            return sorted_recs[0] if sorted_recs else None
+
+        # 睡眠ダッシュボードバー
+        lr = latest_record(cat_records.get("sleep", []))
+        dash.append("### 😴 睡眠")
+        if lr:
+            dash.append(f"- **日付**: {lr.get('date','-')}")
+            dash.append(f"- **スコア**: {lr.get('sleep_score','-')} 点")
+            dash.append(f"- **睡眠時間**: {lr.get('sleep_time_hours_mins','-')}")
+            dash.append(f"- 就寢: {lr.get('bed_time','-')} / 起床: {lr.get('wake_time','-')}")
+        else:
+            dash.append("*データなし*")
+        dash.append("")
+
+        # 心拍数ダッシュボードバー
+        lr = latest_record(cat_records.get("heart_rate", []))
+        dash.append("### ❤️ 心拍数")
+        if lr:
+            dash.append(f"- **日付**: {lr.get('date','-')}")
+            dash.append(f"- **安靜時**: {lr.get('resting_heart_rate_bpm','-')} bpm")
+            dash.append(f"- **範囲**: {lr.get('min_heart_rate_bpm','-')}～{lr.get('max_heart_rate_bpm','-')} bpm")
+        else:
+            dash.append("*データなし*")
+        dash.append("")
+
+        # ストレスダッシュボードバー
+        lr = latest_record(cat_records.get("stress", []))
+        dash.append("### 🧠 ストレス")
+        if lr:
+            dash.append(f"- **日付**: {lr.get('date','-')}")
+            dash.append(f"- **平均スコア**: {lr.get('average_stress_score','-')} ({lr.get('average_stress_level','-')})")
+            dash.append(f"- 最新: {lr.get('latest_stress_score','-')}")
+        else:
+            dash.append("*データなし*")
+        dash.append("")
+
+        # 体組成ダッシュボードバー
+        lr = latest_record(cat_records.get("body_composition", []))
+        dash.append("### ⚖️ 体組成")
+        if lr:
+            dash.append(f"- **日付**: {lr.get('date','-')}")
+            dash.append(f"- **体重**: {lr.get('weight_kg','-')} kg / BMI: {lr.get('bmi','-')}")
+            dash.append(f"- **体脂肪率**: {lr.get('body_fat_percent','-')}%")
+            dash.append(f"- 骨格筋量: {lr.get('skeletal_muscle_mass_kg','-')} kg / 内臓脂肪: {lr.get('visceral_fat_level','-')}")
+            dash.append(f"- 体年齢: {lr.get('body_age','-')}歳 / 基礎代謝: {lr.get('basal_metabolism_kcal','-')} kcal")
+        else:
+            dash.append("*データなし*")
+        dash.append("")
+
+        dash.append("---")
+        dash.append("## 📅 記録一覧 (Daily Notes)")
+        dash.append("")
+        for date_str in sorted(dates_set, reverse=True):
+            dash.append(f"- [[Daily/{date_str}_健康記録|{date_str}]]")
+        dash.append("")
+        dash.append("---")
+        dash.append("> Generated by KENKOU SYUTOKU Pipeline (Gemini 3.7 Flash)")
+
+        dashboard_path.write_text("\n".join(dash), encoding="utf-8")
+        print(f" [Obsidian] ダッシュボード保存: {dashboard_path.name}")
+
+        # --- (C) データファイルの同期 (CSV / Excel) ----------------------------
+        for fname in [
+            "all_health_data.csv",
+            "all_health_data.xlsx",
+            "sleep_history.csv",
+            "heart_rate_history.csv",
+            "stress_history.csv",
+            "body_composition_history.csv",
+            "spo2_history.csv",
+            "health_summary_report.md",
+        ]:
+            src_path = self.output_dir / fname
+            if src_path.exists():
+                shutil.copy2(src_path, data_dir / fname)
+                print(f" [Obsidian] データ同期: {fname}")
+
+        print(f" [Obsidian] 出力先: {obs_dir.resolve()}")
+
     def run(self):
         cat_records = self.load_all_records()
         self.export_csv_and_excel(cat_records)
         self.generate_markdown_report(cat_records)
+        self.export_to_obsidian(cat_records)
 
 if __name__ == "__main__":
     generator = ReportGenerator()

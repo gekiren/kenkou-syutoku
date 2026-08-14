@@ -46,3 +46,16 @@ for directory in [SCREENSHOTS_DIR, JSON_DIR, OUTPUT_DIR]:
 # Gemini APIキー設定
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# Obsidian Vault 出力先（Dropbox共有フォルダ内の KENKOU SYUTOKU ノート）
+# 環境変数 OBSIDIAN_KENKOU_DIR で上書き可能
+OBSIDIAN_OUTPUT_DIR = Path(os.getenv(
+    "OBSIDIAN_KENKOU_DIR",
+    r"C:\Users\toshi\Dropbox\共有\紙\MEMOda\KENKOU SYUTOKU"
+))
+OBSIDIAN_DAILY_DIR = OBSIDIAN_OUTPUT_DIR / "Daily"
+OBSIDIAN_DATA_DIR  = OBSIDIAN_OUTPUT_DIR / "data"
+
+# Obsidian 出力フォルダを自動生成
+for _obs_dir in [OBSIDIAN_OUTPUT_DIR, OBSIDIAN_DAILY_DIR, OBSIDIAN_DATA_DIR]:
+    _obs_dir.mkdir(parents=True, exist_ok=True)
+
