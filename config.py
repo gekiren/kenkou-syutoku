@@ -46,12 +46,13 @@ for directory in [SCREENSHOTS_DIR, JSON_DIR, OUTPUT_DIR]:
 # Gemini APIキー設定
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# Obsidian Vault 出力先（Dropbox共有フォルダ内の KENKOU SYUTOKU ノート）
-# 環境変数 OBSIDIAN_KENKOU_DIR で上書き可能
-OBSIDIAN_OUTPUT_DIR = Path(os.getenv(
-    "OBSIDIAN_KENKOU_DIR",
-    r"C:\Users\toshi\Dropbox\共有\紙\MEMOda\KENKOU SYUTOKU"
-))
+# Obsidian Vault 出力先（環境変数 OBSIDIAN_KENKOU_DIR で任意の Vault ディレクトリへ上書き可能）
+# 未設定の場合はプロジェクト内の data/obsidian を既定の出力先として使用する（マシン非依存の共通挙動）。
+_obsidian_env = os.getenv("OBSIDIAN_KENKOU_DIR")
+if _obsidian_env:
+    OBSIDIAN_OUTPUT_DIR = Path(_obsidian_env)
+else:
+    OBSIDIAN_OUTPUT_DIR = DATA_DIR / "obsidian"
 OBSIDIAN_DAILY_DIR = OBSIDIAN_OUTPUT_DIR / "Daily"
 OBSIDIAN_DATA_DIR  = OBSIDIAN_OUTPUT_DIR / "data"
 
