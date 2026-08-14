@@ -49,4 +49,7 @@
 - [x] セクション順序を検証（Select-String で見出し順序確認）
 - [x] UTF-8 BOM を除去（`#` から開始することを確認）
 - [x] 旧版の復元可能性: Git 履歴に残存
-- [x] `staging` ブランチにローカルコミット（`origin/master` への Push は未実施）
+- [x] `staging` ブランチにローカルコミット
+- [x] ユーザー承認後、`staging` → `master` へ fast-forward マージ
+- [x] `origin/master` へ Push 完了（`0d0b48a..ae3625a`）
+- [x] Obsidian Vault（`Antigravity\Plans\`）へ手動同期・ダッシュボードにリンク追加
