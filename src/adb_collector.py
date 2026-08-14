@@ -84,7 +84,7 @@ class ADBCollector:
         # カテゴリごとのトップ画面上のカードタップ座標 (解像度 1600x2560)
         card_coords = {
             "sleep": (1350, 1150),
-            "heart_rate": (900, 1150),
+            "heart_rate": (1015, 1248),
             "body_composition": (200, 1650),
             "stress": (650, 1650),
             "spo2": (1150, 1650)

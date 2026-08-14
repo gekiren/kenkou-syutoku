@@ -19,6 +19,15 @@ DEFAULT_CAPTURE_DAYS = 7
 # サポートする全データカテゴリ
 CATEGORIES = ["sleep", "spo2", "stress", "body_composition", "heart_rate"]
 
+# トップ画面での各カテゴリカードの正確なタップ座標 (解像度 1600x2560)
+CARD_COORDS = {
+    "sleep": (1350, 1150),
+    "heart_rate": (1015, 1248),
+    "body_composition": (200, 1650),
+    "stress": (650, 1650),
+    "spo2": (1150, 1650)
+}
+
 # データ保存ディレクトリ
 DATA_DIR = BASE_DIR / "data"
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
